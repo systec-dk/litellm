@@ -1363,11 +1363,43 @@ class Logging(LiteLLMLoggingBaseClass):
                 router_model_id = hidden_params["model_id"]
 
         ## RESPONSE COST ##
-        custom_pricing = use_custom_pricing_for_model(
-            litellm_params=(
-                self.litellm_params if hasattr(self, "litellm_params") else None
+        litellm_params = self.litellm_params if hasattr(self, "litellm_params") else None
+        custom_pricing = use_custom_pricing_for_model(litellm_params=litellm_params)
+
+        # Extract custom cost per token from litellm_params if available
+        custom_cost_per_token = None
+        if custom_pricing and litellm_params:
+            # Convert Pydantic model to dict if needed
+            lp_dict = (
+                litellm_params.model_dump()
+                if hasattr(litellm_params, "model_dump")
+                else dict(litellm_params) if isinstance(litellm_params, dict) else {}
             )
-        )
+            input_cost = lp_dict.get("input_cost_per_token")
+            output_cost = lp_dict.get("output_cost_per_token")
+            # Also check model_info
+            if input_cost is None or output_cost is None:
+                model_info = lp_dict.get("model_info")
+                if model_info:
+                    if hasattr(model_info, "model_dump"):
+                        model_info = model_info.model_dump()
+                    elif hasattr(model_info, "__dict__") and not isinstance(model_info, dict):
+                        model_info = vars(model_info)
+                    if isinstance(model_info, dict):
+                        input_cost = input_cost or model_info.get("input_cost_per_token")
+                        output_cost = output_cost or model_info.get("output_cost_per_token")
+            # Also check metadata.model_info
+            if input_cost is None or output_cost is None:
+                metadata = lp_dict.get("metadata", {}) or {}
+                model_info = metadata.get("model_info", {}) or {}
+                if isinstance(model_info, dict):
+                    input_cost = input_cost or model_info.get("input_cost_per_token")
+                    output_cost = output_cost or model_info.get("output_cost_per_token")
+            if input_cost is not None and output_cost is not None:
+                custom_cost_per_token = {
+                    "input_cost_per_token": input_cost,
+                    "output_cost_per_token": output_cost,
+                }
 
         prompt = ""  # use for tts cost calc
         _input = self.model_call_details.get("input", None)
@@ -1376,6 +1408,21 @@ class Logging(LiteLLMLoggingBaseClass):
 
         if cache_hit is None:
             cache_hit = self.model_call_details.get("cache_hit", False)
+
+        # If custom pricing with cost values is available, use completion_cost directly
+        if custom_cost_per_token is not None:
+            try:
+                response_cost = litellm.completion_cost(
+                    completion_response=result,
+                    model=litellm_model_name or self.model,
+                    custom_llm_provider=self.model_call_details.get("custom_llm_provider"),
+                    custom_cost_per_token=custom_cost_per_token,
+                )
+                verbose_logger.debug(f"response_cost (custom pricing): {response_cost}")
+                return response_cost
+            except Exception as e:
+                verbose_logger.debug(f"Error calculating cost with custom pricing: {e}")
+                # Fall through to standard calculation
 
         try:
             response_cost_calculator_kwargs = {
