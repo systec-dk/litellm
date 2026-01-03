@@ -1833,6 +1833,12 @@ class BaseLLMHTTPHandler:
             api_base=api_base,
         )
 
+        # Convert litellm_params to dict if it's a Pydantic model
+        litellm_params_dict = (
+            litellm_params.model_dump()
+            if hasattr(litellm_params, "model_dump")
+            else dict(litellm_params)
+        )
         logging_obj.update_environment_variables(
             model=model,
             optional_params=dict(anthropic_messages_optional_request_params),
@@ -1841,6 +1847,10 @@ class BaseLLMHTTPHandler:
                 "preset_cache_key": None,
                 "stream_response": {},
                 **anthropic_messages_optional_request_params,
+                # Include cost-related params from the original litellm_params
+                "input_cost_per_token": litellm_params_dict.get("input_cost_per_token"),
+                "output_cost_per_token": litellm_params_dict.get("output_cost_per_token"),
+                "model_info": litellm_params_dict.get("model_info"),
             },
             custom_llm_provider=custom_llm_provider,
         )
