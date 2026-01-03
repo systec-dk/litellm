@@ -12,6 +12,10 @@ on:
       commit_hash:
         description: "Commit hash"
         required: true
+      base_image_only:
+        description: "Build only the base Dockerfile (skip additional images like database, non_root, spend-logs, ee)"
+        type: boolean
+        default: false
 
 # Defines two custom environment variables for the workflow. Used for the Container registry domain, and a name for the Docker image that this workflow builds.
 env:
@@ -56,9 +60,10 @@ jobs:
         with:
           context: .
           push: true
-          tags: litellm/litellm:${{ github.event.inputs.tag || 'latest' }} 
+          tags: litellm/litellm:${{ github.event.inputs.tag || 'latest' }}
       -
         name: Build and push litellm-database image
+        if: ${{ github.event.inputs.base_image_only != 'true' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -67,6 +72,7 @@ jobs:
           tags: litellm/litellm-database:${{ github.event.inputs.tag || 'latest' }}
       -
         name: Build and push litellm-spend-logs image
+        if: ${{ github.event.inputs.base_image_only != 'true' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -75,6 +81,7 @@ jobs:
           tags: litellm/litellm-spend_logs:${{ github.event.inputs.tag || 'latest' }}
       -
         name: Build and push litellm-non_root image
+        if: ${{ github.event.inputs.base_image_only != 'true' }}
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -128,6 +135,7 @@ jobs:
           platforms: local,linux/amd64,linux/arm64,linux/arm64/v8
   
   build-and-push-image-ee:
+    if: ${{ github.event.inputs.base_image_only != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -171,6 +179,7 @@ jobs:
           platforms: local,linux/amd64,linux/arm64,linux/arm64/v8
    
   build-and-push-image-database:
+    if: ${{ github.event.inputs.base_image_only != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -214,6 +223,7 @@ jobs:
           platforms: local,linux/amd64,linux/arm64,linux/arm64/v8
             
   build-and-push-image-non_root:
+    if: ${{ github.event.inputs.base_image_only != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -257,6 +267,7 @@ jobs:
           platforms: local,linux/amd64,linux/arm64,linux/arm64/v8
   
   build-and-push-image-spend-logs:
+    if: ${{ github.event.inputs.base_image_only != 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -299,7 +310,7 @@ jobs:
           platforms: local,linux/amd64,linux/arm64,linux/arm64/v8
 
   build-and-push-helm-chart:
-    if: github.event.inputs.release_type  != 'dev'
+    if: ${{ github.event.inputs.release_type != 'dev' && github.event.inputs.base_image_only != 'true' }}
     needs: [docker-hub-deploy, build-and-push-image, build-and-push-image-database]
     runs-on: ubuntu-latest
     steps:
@@ -379,6 +390,7 @@ jobs:
           update_dependencies: true
 
   release:
+    if: ${{ github.event.inputs.base_image_only != 'true' }}
     name: "New LiteLLM Release"
     needs: [docker-hub-deploy, build-and-push-image, build-and-push-image-database]
 
