@@ -124,10 +124,55 @@ class AnthropicPassthroughLoggingHandler:
             if custom_llm_provider and not model.startswith(f"{custom_llm_provider}/"):
                 model_for_cost = f"{custom_llm_provider}/{model}"
 
+            # Extract custom pricing from model_info if available (set via database/UI)
+            custom_cost_per_token = None
+            input_cost = None
+            output_cost = None
+
+            model_call_details = getattr(logging_obj, "model_call_details", {}) or {}
+            mcd_litellm_params = model_call_details.get("litellm_params", {}) or {}
+
+            # Debug: Check type of litellm_params
+            verbose_proxy_logger.debug(
+                f"[CUSTOM_PRICING_DEBUG] mcd_litellm_params type={type(mcd_litellm_params).__name__}"
+            )
+
+            # Convert Pydantic model to dict if needed
+            if hasattr(mcd_litellm_params, "model_dump"):
+                mcd_litellm_params = mcd_litellm_params.model_dump()
+            elif hasattr(mcd_litellm_params, "__dict__") and not isinstance(mcd_litellm_params, dict):
+                mcd_litellm_params = vars(mcd_litellm_params)
+
+            # Source 1: Direct cost values in litellm_params (highest priority)
+            input_cost = mcd_litellm_params.get("input_cost_per_token")
+            output_cost = mcd_litellm_params.get("output_cost_per_token")
+
+            # Source 2: model_info in litellm_params
+            if input_cost is None or output_cost is None:
+                model_info = mcd_litellm_params.get("model_info")
+                if model_info:
+                    if hasattr(model_info, "model_dump"):
+                        model_info = model_info.model_dump()
+                    elif hasattr(model_info, "__dict__") and not isinstance(model_info, dict):
+                        model_info = vars(model_info)
+                    if isinstance(model_info, dict):
+                        input_cost = input_cost or model_info.get("input_cost_per_token")
+                        output_cost = output_cost or model_info.get("output_cost_per_token")
+
+            verbose_proxy_logger.debug(
+                f"[CUSTOM_PRICING_DEBUG] input_cost={input_cost}, output_cost={output_cost}"
+            )
+            if input_cost is not None and output_cost is not None:
+                custom_cost_per_token = {
+                    "input_cost_per_token": input_cost,
+                    "output_cost_per_token": output_cost,
+                }
+
             response_cost = litellm.completion_cost(
                 completion_response=litellm_model_response,
                 model=model_for_cost,
                 custom_llm_provider=custom_llm_provider,
+                custom_cost_per_token=custom_cost_per_token,
             )
 
             kwargs["response_cost"] = response_cost
